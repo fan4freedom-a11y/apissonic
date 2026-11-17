@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ApisSonic — Acoustic Beehive Diagnostics</title>
+  <meta name="description" content="Smartphone acoustic beehive diagnostics: listen to a colony and screen for queenless, pre-swarm, piping and fanning states.">
+  <meta name="theme-color" content="#14110b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ApisSonic">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2l12 7v14l-12 7-12-7V9z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 17c2-5 3 5 5 0s3 5 5 0 3 5 6 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <div>
+        <h1>ApisSonic</h1>
+        <p class="tagline">Acoustic hive diagnostics</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="status-pill" class="pill">Idle</span>
+      <button id="theme-btn" class="icon-btn" type="button" aria-label="Switch light / dark theme">◐</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card" aria-labelledby="h-setup">
+      <h2 id="h-setup">Hive</h2>
+      <div class="form-grid">
+        <label>Hive ID
+          <input id="hive-id" type="text" maxlength="40" autocomplete="off" placeholder="e.g. Hive-07">
+        </label>
+        <label>Mic position / wall
+          <select id="material"></select>
+        </label>
+        <label>Air temp (°C)
+          <input id="temp" type="number" inputmode="decimal" step="0.5" min="-20" max="55">
+        </label>
+        <label>Time of day
+          <select id="tod">
+            <option value="auto">Auto</option>
+            <option value="day">Day</option>
+            <option value="night">Night</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="h-source">
+      <h2 id="h-source">Listen</h2>
+      <div class="segmented" role="radiogroup" aria-label="Sound source">
+        <button type="button" role="radio" data-source="mic" aria-checked="true">Microphone</button>
+        <button type="button" role="radio" data-source="file" aria-checked="false">Audio file</button>
+        <button type="button" role="radio" data-source="sim" aria-checked="false">Simulator</button>
+      </div>
+      <div id="source-file" class="source-extra" hidden>
+        <input id="file-input" type="file" accept="audio/*,.wav,.mp3,.m4a" aria-label="Choose a .wav or .mp3 recording">
+      </div>
+      <div id="source-sim" class="source-extra" hidden>
+        <label>Simulated colony state
+          <select id="sim-state"></select>
+        </label>
+      </div>
+      <div class="button-row">
+        <button id="start-btn" class="btn primary" type="button">Start listening</button>
+        <button id="scan-btn" class="btn" type="button" disabled>15 s scan</button>
+      </div>
+      <div id="scan-progress" class="progress" hidden><div id="scan-bar"></div><span id="scan-label">Scanning…</span></div>
+      <p id="mic-hint" class="hint">Hold the phone mic at the hive entrance or flat against the wall, and keep still during the scan.</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-diag">
+      <h2 id="h-diag">Diagnosis</h2>
+      <div class="diag-top">
+        <div>
+          <div id="diag-state" class="diag-state">—</div>
+          <div id="diag-sub" class="diag-sub">Start listening to see a live reading</div>
+        </div>
+        <div class="diag-hz"><span id="diag-hz">—</span><small>Hz peak</small></div>
+      </div>
+      <div id="artifact-badge" class="badge" hidden></div>
+      <div id="prob-bars" class="prob-bars"></div>
+      <p class="hint">Screening aid only. The bundled classifier was trained on synthesized sounds — confirm with a physical inspection.</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-signal">
+      <h2 id="h-signal">Signal</h2>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="fft" aria-selected="true">Spectrum</button>
+        <button type="button" role="tab" data-tab="waterfall" aria-selected="false">Waterfall</button>
+        <button type="button" role="tab" data-tab="mfcc" aria-selected="false">MFCC</button>
+        <button type="button" role="tab" data-tab="trend" aria-selected="false">Hive trend</button>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="cv-fft" aria-label="Live frequency spectrum, 0 to 1200 hertz"></canvas>
+        <canvas id="cv-waterfall" width="480" height="220" hidden aria-label="Spectrogram waterfall"></canvas>
+        <canvas id="cv-mfcc" width="480" height="208" hidden aria-label="MFCC cepstrogram"></canvas>
+        <canvas id="cv-trend" hidden aria-label="Hum frequency trend for this hive"></canvas>
+      </div>
+      <p id="signal-meta" class="hint"></p>
+    </section>
+
+    <section class="card" aria-labelledby="h-triage">
+      <h2 id="h-triage">Yard triage</h2>
+      <div id="triage-grid" class="triage-grid"></div>
+    </section>
+
+    <section class="card" aria-labelledby="h-log">
+      <h2 id="h-log">Inspection log</h2>
+      <div id="log-list" class="log-list"></div>
+      <div class="button-row wrap">
+        <button id="csv-btn" class="btn small" type="button">Export CSV</button>
+        <button id="report-btn" class="btn small" type="button">Print report</button>
+        <button id="qr-btn" class="btn small" type="button">QR hive tag</button>
+        <button id="clear-btn" class="btn small danger" type="button">Clear log</button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="h-tools">
+      <h2 id="h-tools">Calibration &amp; model</h2>
+      <div class="button-row wrap">
+        <button id="floor-btn" class="btn small" type="button">Calibrate mic floor (3 s)</button>
+        <button id="floor-clear-btn" class="btn small" type="button">Clear floor</button>
+        <button id="weights-btn" class="btn small" type="button">📂 Load Weights JSON</button>
+        <button id="weights-reset-btn" class="btn small" type="button">Use built-in weights</button>
+        <input id="weights-input" type="file" accept="application/json,.json" hidden>
+      </div>
+      <p id="tools-meta" class="hint"></p>
+      <p class="hint"><a href="test-suite.html">Run the 16 self-tests</a></p>
+    </section>
+  </main>
+
+  <div id="qr-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="qr-title">
+    <div class="modal-box">
+      <h2 id="qr-title">QR hive tag</h2>
+      <div id="qr-holder" class="qr-holder"></div>
+      <p id="qr-caption" class="qr-caption"></p>
+      <p id="qr-url" class="hint qr-url"></p>
+      <div class="button-row">
+        <button id="qr-print-btn" class="btn primary small" type="button">Print tag</button>
+        <button id="qr-close-btn" class="btn small" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="print-area"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

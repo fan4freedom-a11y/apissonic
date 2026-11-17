@@ -1,0 +1,11 @@
+{
+  "appId": "com.apissonic.app",
+  "appName": "ApisSonic",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "always"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

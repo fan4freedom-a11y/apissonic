@@ -1,0 +1,16 @@
+{
+  "name": "ApisSonic — Acoustic Beehive Diagnostics",
+  "short_name": "ApisSonic",
+  "description": "Listen to a bee colony with your phone and screen for queenless, pre-swarm, piping and fanning states.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14110b",
+  "theme_color": "#14110b",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

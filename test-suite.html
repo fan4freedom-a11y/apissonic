@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ApisSonic — Test Suite</title>
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .t { padding: 8px 10px; border-radius: 10px; background: var(--card-2); border-left: 4px solid var(--line); font-size: 0.9rem; }
+    .t.ok { border-left-color: var(--healthy); }
+    .t.bad { border-left-color: var(--queenless); }
+    .t small { display: block; color: var(--queenless); overflow-wrap: anywhere; }
+    #list { display: grid; gap: 6px; }
+    #summary { font-size: 1.4rem; font-weight: 700; margin: 0 0 12px; }
+  </style>
+</head>
+<body>
+  <header class="app-header"><div class="brand"><div><h1>ApisSonic self-tests</h1><p class="tagline">DSP · MFCC · MLP · WAV · calibration · QR</p></div></div></header>
+  <main>
+    <section class="card">
+      <p id="summary">Running…</p>
+      <div id="list"></div>
+      <p class="hint"><a href="index.html">← Back to the app</a></p>
+    </section>
+  </main>
+  <script type="module">
+    import { runAllTests } from './tests/dsp-ml-tests.js';
+    const list = document.getElementById('list');
+    const summary = document.getElementById('summary');
+    runAllTests().then((results) => {
+      for (const r of results) {
+        const el = document.createElement('div');
+        el.className = 't ' + (r.ok ? 'ok' : 'bad');
+        el.textContent = (r.ok ? '✓ ' : '✗ ') + r.name;
+        if (!r.ok) {
+          const s = document.createElement('small');
+          s.textContent = r.error;
+          el.appendChild(s);
+        }
+        list.appendChild(el);
+      }
+      const passed = results.filter((r) => r.ok).length;
+      summary.textContent = `${passed}/${results.length} tests passed`;
+      summary.style.color = passed === results.length ? 'var(--healthy)' : 'var(--queenless)';
+    }).catch((err) => {
+      summary.textContent = 'Test runner failed: ' + err.message;
+    });
+  </script>
+</body>
+</html>
