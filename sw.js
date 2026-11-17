@@ -1,6 +1,6 @@
 // sw.js — offline cache so ApisSonic keeps working at apiaries with no signal.
 // Bump CACHE whenever you deploy changed files.
-const CACHE = 'apissonic-v1';
+const CACHE = 'apissonic-v2';
 const ASSETS = [
   './',
   'index.html',
@@ -13,12 +13,12 @@ const ASSETS = [
   'qr-report.js',
   'manifest.json',
   'test-suite.html',
-  'tests/dsp-ml-tests.js',
-  'ml/custom_mlp_weights.json',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/icon-maskable-512.png',
-  'icons/apple-touch-icon.png',
+  'dsp-ml-tests.js',
+  'custom_mlp_weights.json',
+  'icon-192.png',
+  'icon-512.png',
+  'icon-maskable-512.png',
+  'apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (event) => {

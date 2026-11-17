@@ -1,11 +1,11 @@
 // tests/dsp-ml-tests.js — 16 deterministic DSP, MFCC, MLP, WAV, calibration & QR checks.
 // Browser: open test-suite.html.   Node: node tests/dsp-ml-tests.js
 
-import * as dsp from '../dsp-engine.js';
-import * as ml from '../ml-classifier.js';
-import * as cal from '../calibration.js';
-import { encodeMonoWAVBuffer } from '../audio-store.js';
-import { parseDeepLink, buildDeepLink, generateQRMatrix, buildTriage } from '../qr-report.js';
+import * as dsp from './dsp-engine.js';
+import * as ml from './ml-classifier.js';
+import * as cal from './calibration.js';
+import { encodeMonoWAVBuffer } from './audio-store.js';
+import { parseDeepLink, buildDeepLink, generateQRMatrix, buildTriage } from './qr-report.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
