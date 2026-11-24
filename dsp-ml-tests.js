@@ -1,4 +1,4 @@
-// tests/dsp-ml-tests.js — 16 deterministic DSP, MFCC, MLP, WAV, calibration & QR checks.
+// tests/dsp-ml-tests.js — 17 deterministic DSP, MFCC, MLP, WAV, calibration, QR & scan-image checks.
 // Browser: open test-suite.html.   Node: node tests/dsp-ml-tests.js
 
 import * as dsp from './dsp-engine.js';
@@ -6,6 +6,7 @@ import * as ml from './ml-classifier.js';
 import * as cal from './calibration.js';
 import { encodeMonoWAVBuffer } from './audio-store.js';
 import { parseDeepLink, buildDeepLink, generateQRMatrix, buildTriage } from './qr-report.js';
+import { ScanImageRecorder, summarizeScanFrames, IMAGE_MAX_HZ } from './scan-images.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -229,6 +230,31 @@ test('16. End to end: synthesized colonies classify correctly; scan, triage and 
   for (let y = 0; y < 7; y++) assert(small.modules[y].slice(0, 7).map((b) => (b ? 1 : 0)).join('') === finder[y], 'finder pattern');
   const big = generateQRMatrix(url);
   assert(big.size > 21 && big.size <= 41, 'URL payload picks a larger version');
+});
+
+test('17. Scan images: recorder keeps 0–1200 Hz per frame and the saved spectrum averages clean frames in linear power', () => {
+  const rec = new ScanImageRecorder();
+  const n = dsp.FFT_SIZE / 2;
+  const binHz = SR / dsp.FFT_SIZE;
+  const frameAt = (peakHz, level) => {
+    const db = new Float32Array(n).fill(-90);
+    db[Math.round(peakHz / binHz)] = level;
+    return db;
+  };
+  const mfcc = new Float32Array(13).fill(1);
+  rec.add(frameAt(250, -20), mfcc, SR, true);
+  rec.add(frameAt(250, -30), mfcc, SR, true);
+  rec.add(frameAt(900, 0), mfcc, SR, false); // rejected frame: shown in waterfall, excluded from the mean
+  assert(rec.length === 3, 'frame count');
+  assert(rec.frames[0].spec.length === Math.ceil(IMAGE_MAX_HZ / binHz) + 1, 'spectrum cropped to 0–1200 Hz');
+  assert(rec.frames[0].mfcc.length === 13 && rec.frames[0].mfcc !== mfcc, 'MFCCs copied per frame');
+  const sum = summarizeScanFrames(rec.frames, rec.binHz);
+  assert(sum.usedFrames === 2, 'only clean frames averaged');
+  near(sum.peakHz, Math.round(250 / binHz) * binHz, 1e-9, 'peak of mean spectrum');
+  near(sum.meanDb[Math.round(250 / binHz)], 10 * Math.log10((1e-2 + 1e-3) / 2), 1e-4, 'power-domain mean');
+  assert(sum.topDb >= 0, 'colour range covers the loudest (rejected) frame too');
+  rec.reset();
+  assert(rec.length === 0 && summarizeScanFrames(rec.frames, binHz) === null, 'reset');
 });
 
 export async function runAllTests() {

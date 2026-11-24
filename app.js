@@ -1,6 +1,6 @@
-// app.js — ApisSonic UI controller: wiring, canvas renderers, log / CSV / WAV / QR actions.
+// app.js — ApisSonic UI controller: wiring, canvas renderers, colony picker, log / CSV / WAV / QR / scan-image actions.
 
-import { DSPEngine, ScanAccumulator, computeAllBands, BANDS, SCAN_SECONDS, SYNTH_STATES, FFT_SIZE } from './dsp-engine.js';
+import { DSPEngine, ScanAccumulator, computeAllBands, BANDS, SCAN_SECONDS, SYNTH_STATES, FFT_SIZE, ANALYSIS_HOP_MS } from './dsp-engine.js';
 import {
   FeatureExtractor, mlpForward, bayesBandRatio, fuseEnsemble, validateWeights, argmax,
   DEFAULT_WEIGHTS, LABELS, LABEL_NAMES,
@@ -10,14 +10,18 @@ import {
   environmentPriors, autoTimeOfDay,
 } from './calibration.js';
 import {
-  encodeMonoWAV, saveInspection, listInspections, saveClip, getClip, deleteInspection, clearAll, requestPersistence,
+  encodeMonoWAV, saveInspection, listInspections, saveClip, getClip, saveImages, getImages, deleteInspection, clearAll,
+  requestPersistence,
 } from './audio-store.js';
+import { ScanImageRecorder, renderScanImages, IMAGE_KINDS, IMAGE_NAMES } from './scan-images.js';
 import { parseDeepLink, buildDeepLink, generateQRMatrix, qrToSVG, buildTriage, buildReportHTML } from './qr-report.js';
 
 const $ = (id) => document.getElementById(id);
 const CFG_KEY = 'apissonic.cfg';
 const WEIGHTS_KEY = 'apissonic.weights';
 const THEME_KEY = 'apissonic.theme';
+const COLONIES_KEY = 'apissonic.colonies';
+const NEW_COLONY = '__new__';
 const MIN_CLEAN_FRAMES = 40;
 const PLOT_MAX_HZ = 1200;
 
@@ -49,6 +53,14 @@ const link = parseDeepLink(location.search);
 if (link.hive) cfg.hive = link.hive;
 if (link.material && MATERIALS[link.material]) cfg.material = link.material;
 if (link.temp !== undefined) cfg.temp = link.temp;
+if (typeof cfg.hive !== 'string' || !cfg.hive.trim()) cfg.hive = 'Hive-01';
+
+// Colonies the beekeeper has registered (the Hive ID dropdown also lists any hive with saved scans).
+let colonies = store.get(COLONIES_KEY, []);
+if (!Array.isArray(colonies)) colonies = [];
+colonies = colonies.filter((c) => typeof c === 'string' && c.trim());
+if (cfg.hive && cfg.hive.trim() && !colonies.includes(cfg.hive.trim())) colonies.push(cfg.hive.trim());
+store.set(COLONIES_KEY, colonies);
 
 let weights = DEFAULT_WEIGHTS;
 let customWeights = false;
@@ -70,6 +82,7 @@ let lastFrameInfo = null;
 const extractor = new FeatureExtractor();
 const micFloor = new MicFloor();
 const scan = new ScanAccumulator(SCAN_SECONDS * 1000);
+const imgRec = new ScanImageRecorder();
 const scratchFloor = new Float32Array(FFT_SIZE / 2);
 const scratchCal = new Float32Array(FFT_SIZE / 2);
 
@@ -141,6 +154,7 @@ function handleFrame({ db, time, sampleRate, artifact }) {
     else for (let i = 0; i < fused.length; i++) smoothed[i] += 0.15 * (fused[i] - smoothed[i]);
   }
   if (scan.active) {
+    imgRec.add(dbCal, feat.mfcc, sampleRate, usable);
     const progress = scan.add({ isArtifact: artifact.isArtifact, quiet: artifact.quiet, dominantHz: feat.dominantHz, probs: fused }, now);
     $('scan-bar').style.width = Math.min(100, progress * 100) + '%';
     $('scan-label').textContent = `Scanning… ${Math.max(0, Math.ceil(SCAN_SECONDS * (1 - progress)))} s · ${scan.cleanFrames} clean frames`;
@@ -422,10 +436,11 @@ function stop() {
 function beginScan() {
   if (!engine.running || scan.active) return;
   if (!cfg.hive.trim()) {
-    toast('Enter a Hive ID first');
+    toast('Choose a colony in the Hive ID list first');
     return;
   }
   engine.startRecording();
+  imgRec.reset();
   scan.start(performance.now());
   $('scan-progress').hidden = false;
   $('scan-bar').style.width = '0%';
@@ -437,6 +452,8 @@ async function finishScan() {
   const result = scan.result(LABELS);
   const sr = engine.sampleRate;
   const mode = engine.mode || source;
+  const imgFrames = { frames: imgRec.frames, binHz: imgRec.binHz };
+  imgRec.reset();
   scan.reset();
   $('scan-progress').hidden = true;
   $('scan-btn').disabled = !engine.running;
@@ -462,7 +479,24 @@ async function finishScan() {
     sampleRate: sr,
     customWeights,
     hasWav: false,
+    hasImages: false,
   };
+  try {
+    const images = await renderScanImages(imgFrames, {
+      hive: rec.hiveId,
+      when: new Date(id).toLocaleString(),
+      state: `${LABEL_NAMES[rec.state]} ${Math.round(rec.confidence * 100)}%`,
+      meanHz: rec.meanHz,
+      seconds: (imgFrames.frames.length * ANALYSIS_HOP_MS) / 1000,
+      labelNames: LABEL_NAMES,
+    });
+    if (images) {
+      await saveImages(id, images);
+      rec.hasImages = true;
+    }
+  } catch (e) {
+    rec.hasImages = false;
+  }
   try {
     if (chunks.length) {
       await saveClip(id, encodeMonoWAV(chunks, sr));
@@ -518,6 +552,14 @@ function renderLog() {
       };
       actions.appendChild(wav);
     }
+    if (r.hasImages) {
+      const img = document.createElement('button');
+      img.type = 'button';
+      img.textContent = '🖼';
+      img.setAttribute('aria-label', `View spectrum, waterfall and MFCC images for ${r.hiveId}`);
+      img.onclick = () => openImages(r, 'spectrum');
+      actions.appendChild(img);
+    }
     const del = document.createElement('button');
     del.type = 'button';
     del.textContent = '✕';
@@ -528,6 +570,7 @@ function renderLog() {
         await deleteInspection(r.id);
       } catch (e) { /* ignore */ }
       inspections = inspections.filter((x) => x.id !== r.id);
+      dropImageUrls(r.id);
       renderLog();
     };
     actions.appendChild(del);
@@ -535,6 +578,7 @@ function renderLog() {
     list.appendChild(row);
   }
   renderTriage();
+  renderHiveSelect();
   drawTrend();
 }
 
@@ -550,14 +594,13 @@ function renderTriage() {
     return;
   }
   for (const c of cards) {
-    const el = document.createElement('button');
-    el.type = 'button';
+    const el = document.createElement('div');
     el.className = 'triage-card';
     el.style.setProperty('--state', stateColor(c.state));
-    el.style.textAlign = 'left';
-    el.style.font = 'inherit';
-    el.style.color = 'inherit';
-    el.style.cursor = 'pointer';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 't-open';
+    open.setAttribute('aria-label', `Select ${c.hiveId} and show its trend`);
     const drift = c.driftHz === null ? 'first scan' : `Δ ${c.driftHz >= 0 ? '+' : ''}${c.driftHz.toFixed(1)} Hz`;
     const rank = document.createElement('span');
     rank.className = 't-rank';
@@ -571,16 +614,194 @@ function renderTriage() {
     const meta = document.createElement('div');
     meta.className = 't-meta';
     meta.textContent = `${c.meanHz.toFixed(0)} Hz · ${drift} · ${fmtDate(c.latest.id)}`;
-    el.append(rank, hive, st, meta);
-    el.onclick = () => {
-      cfg.hive = c.hiveId;
-      $('hive-id').value = c.hiveId;
-      store.set(CFG_KEY, cfg);
+    open.append(rank, hive, st, meta);
+    open.onclick = () => {
+      setHive(c.hiveId);
       selectTab('trend');
       $('cv-trend').scrollIntoView({ block: 'center', behavior: 'smooth' });
     };
+    el.appendChild(open);
+
+    // Latest scan's saved images (spectrum / waterfall / MFCC).
+    const withImages = c.history.find((r) => r.hasImages);
+    if (withImages) {
+      const thumbs = document.createElement('div');
+      thumbs.className = 't-thumbs';
+      for (const kind of IMAGE_KINDS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.setAttribute('aria-label', `${IMAGE_NAMES[kind]} image for ${c.hiveId}, ${fmtDate(withImages.id)}`);
+        const img = document.createElement('img');
+        img.alt = '';
+        const cap = document.createElement('span');
+        cap.textContent = IMAGE_NAMES[kind];
+        b.append(img, cap);
+        b.onclick = () => openImages(withImages, kind);
+        thumbs.appendChild(b);
+        imageUrls(withImages.id).then((urls) => {
+          if (urls && urls[kind]) img.src = urls[kind];
+        });
+      }
+      el.appendChild(thumbs);
+      if (withImages !== c.latest) {
+        const note = document.createElement('p');
+        note.className = 't-noimg';
+        note.textContent = `Images from ${fmtDate(withImages.id)}`;
+        el.appendChild(note);
+      }
+    } else {
+      const note = document.createElement('p');
+      note.className = 't-noimg';
+      note.textContent = 'No saved images yet — run a 15 s scan.';
+      el.appendChild(note);
+    }
     grid.appendChild(el);
   }
+}
+
+// ------------------------------------------------------------------ scan images (Yard triage)
+
+const urlCache = new Map(); // inspection id → Promise<{ spectrum, waterfall, mfcc } object URLs | null>
+
+function imageUrls(id) {
+  if (!urlCache.has(id)) {
+    urlCache.set(id, getImages(id).then((imgs) => {
+      if (!imgs) return null;
+      const out = {};
+      for (const k of IMAGE_KINDS) if (imgs[k]) out[k] = URL.createObjectURL(imgs[k]);
+      return out;
+    }).catch(() => null));
+  }
+  return urlCache.get(id);
+}
+
+function dropImageUrls(id) {
+  const p = urlCache.get(id);
+  urlCache.delete(id);
+  if (p) p.then((urls) => urls && Object.values(urls).forEach((u) => URL.revokeObjectURL(u)));
+}
+
+let viewer = null; // { rec, kind }
+
+function imageFileName(rec, kind) {
+  const stamp = new Date(rec.id).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return `apissonic_${rec.hiveId.replace(/[^\w-]+/g, '_')}_${rec.state}_${stamp}_${kind}.png`;
+}
+
+async function showImage(kind) {
+  if (!viewer) return;
+  viewer.kind = kind;
+  document.querySelectorAll('#img-tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.img === kind)));
+  const urls = await imageUrls(viewer.rec.id);
+  const img = $('img-view');
+  if (urls && urls[kind]) {
+    img.src = urls[kind];
+    img.alt = `${IMAGE_NAMES[kind]} of the 15 s scan for ${viewer.rec.hiveId}`;
+  } else {
+    img.removeAttribute('src');
+    img.alt = 'Image not found on this device';
+  }
+}
+
+function openImages(rec, kind) {
+  viewer = { rec, kind };
+  $('img-title').textContent = `${rec.hiveId} — scan images`;
+  $('img-caption').textContent = `${fmtDate(rec.id)} · ${LABEL_NAMES[rec.state] || rec.state} ${Math.round(rec.confidence * 100)}% · ${rec.meanHz.toFixed(0)} Hz ± ${rec.sdHz.toFixed(1)}`;
+  $('img-modal').hidden = false;
+  showImage(kind);
+  $('img-close-btn').focus();
+}
+
+function closeImages() {
+  $('img-modal').hidden = true;
+  viewer = null;
+}
+
+async function downloadImages(kinds) {
+  if (!viewer) return;
+  const rec = viewer.rec;
+  const imgs = await getImages(rec.id).catch(() => null);
+  if (!imgs) return toast('Images not found on this device');
+  kinds.forEach((k, i) => {
+    if (imgs[k]) setTimeout(() => download(imgs[k], imageFileName(rec, k)), i * 400);
+  });
+}
+
+// ------------------------------------------------------------------ colony (Hive ID) picker
+
+const naturalCmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
+function knownColonies() {
+  const set = new Set(colonies);
+  for (const r of inspections) if (r.hiveId) set.add(r.hiveId);
+  if (cfg.hive.trim()) set.add(cfg.hive.trim());
+  return [...set].sort(naturalCmp);
+}
+
+function renderHiveSelect() {
+  const sel = $('hive-id');
+  const latest = new Map();
+  const counts = new Map();
+  for (const r of inspections) {
+    counts.set(r.hiveId, (counts.get(r.hiveId) || 0) + 1);
+    if (!latest.has(r.hiveId) || latest.get(r.hiveId).id < r.id) latest.set(r.hiveId, r);
+  }
+  sel.textContent = '';
+  for (const name of knownColonies()) {
+    const r = latest.get(name);
+    const n = counts.get(name) || 0;
+    const label = r ? `${name} — ${LABEL_NAMES[r.state] || r.state} · ${n} scan${n === 1 ? '' : 's'}` : `${name} — no scans yet`;
+    sel.add(new Option(label, name));
+  }
+  sel.add(new Option('＋ Add new colony…', NEW_COLONY));
+  sel.value = cfg.hive.trim();
+  const n = counts.get(cfg.hive.trim()) || 0;
+  $('hive-hint').textContent = n ? `Scans are saved to ${cfg.hive.trim()} (${n} so far).` : `Scans will be saved to ${cfg.hive.trim()}.`;
+}
+
+function setHive(name) {
+  name = String(name || '').trim().slice(0, 40);
+  if (!name) return;
+  if (!colonies.includes(name)) {
+    colonies.push(name);
+    store.set(COLONIES_KEY, colonies);
+  }
+  cfg.hive = name;
+  store.set(CFG_KEY, cfg);
+  renderHiveSelect();
+  drawTrend();
+}
+
+function showNewColony(on) {
+  $('hive-new-row').hidden = !on;
+  if (on) {
+    $('hive-new').value = '';
+    $('hive-new').focus();
+  } else renderHiveSelect();
+}
+
+function addColony() {
+  const name = $('hive-new').value.trim();
+  if (!name) return toast('Type a colony name, e.g. Hive-07');
+  const existing = knownColonies().find((c) => c.toLowerCase() === name.toLowerCase());
+  $('hive-new-row').hidden = true;
+  setHive(existing || name);
+  toast(existing ? `Selected existing colony ${existing}` : `Added colony ${name}`);
+}
+
+function removeColony() {
+  const name = cfg.hive.trim();
+  const n = inspections.filter((r) => r.hiveId === name).length;
+  if (n) return toast(`${name} has ${n} saved scan(s). Delete them in the Inspection log first.`, 5000);
+  const rest = knownColonies().filter((c) => c !== name);
+  if (!rest.length) return toast('Keep at least one colony — add another before removing this one.');
+  if (!confirm(`Remove ${name} from the colony list?`)) return;
+  colonies = colonies.filter((c) => c !== name);
+  store.set(COLONIES_KEY, colonies);
+  cfg.hive = rest[0];
+  store.set(CFG_KEY, cfg);
+  renderHiveSelect();
+  drawTrend();
 }
 
 function exportCSV() {
@@ -609,7 +830,7 @@ function currentTagUrl() {
 }
 
 function openQR() {
-  if (!cfg.hive.trim()) return toast('Enter a Hive ID first');
+  if (!cfg.hive.trim()) return toast('Choose a colony in the Hive ID list first');
   const url = currentTagUrl();
   try {
     $('qr-holder').innerHTML = qrToSVG(generateQRMatrix(url));
@@ -704,14 +925,12 @@ function init() {
   for (const [id, m] of Object.entries(MATERIALS)) mat.add(new Option(m.label, id));
   const sim = $('sim-state');
   for (const s of SYNTH_STATES) sim.add(new Option(LABEL_NAMES[s], s));
-  $('hive-id').value = cfg.hive;
   mat.value = cfg.material;
   $('temp').value = cfg.temp;
   $('tod').value = cfg.tod;
   buildProbBars();
 
   const saveCfg = () => {
-    cfg.hive = $('hive-id').value;
     cfg.material = mat.value;
     const t = parseFloat($('temp').value);
     cfg.temp = Number.isFinite(t) ? t : 22;
@@ -719,7 +938,22 @@ function init() {
     store.set(CFG_KEY, cfg);
     drawTrend();
   };
-  for (const id of ['hive-id', 'material', 'temp', 'tod']) $(id).addEventListener('change', saveCfg);
+  for (const id of ['material', 'temp', 'tod']) $(id).addEventListener('change', saveCfg);
+  renderHiveSelect();
+  $('hive-id').addEventListener('change', (e) => {
+    if (e.target.value === NEW_COLONY) showNewColony(true);
+    else {
+      $('hive-new-row').hidden = true;
+      setHive(e.target.value);
+    }
+  });
+  $('hive-add-btn').addEventListener('click', addColony);
+  $('hive-cancel-btn').addEventListener('click', () => showNewColony(false));
+  $('hive-new').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addColony();
+    else if (e.key === 'Escape') showNewColony(false);
+  });
+  $('hive-remove-btn').addEventListener('click', removeColony);
   store.set(CFG_KEY, cfg);
 
   document.querySelectorAll('.segmented button').forEach((b) => b.addEventListener('click', () => selectSource(b.dataset.source)));
@@ -737,8 +971,18 @@ function init() {
   $('qr-modal').addEventListener('click', (e) => {
     if (e.target === $('qr-modal')) $('qr-modal').hidden = true;
   });
+  document.querySelectorAll('#img-tabs button').forEach((b) => b.addEventListener('click', () => showImage(b.dataset.img)));
+  $('img-dl-btn').addEventListener('click', () => viewer && downloadImages([viewer.kind]));
+  $('img-dl-all-btn').addEventListener('click', () => downloadImages(IMAGE_KINDS));
+  $('img-close-btn').addEventListener('click', closeImages);
+  $('img-modal').addEventListener('click', (e) => {
+    if (e.target === $('img-modal')) closeImages();
+  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') $('qr-modal').hidden = true;
+    if (e.key === 'Escape') {
+      $('qr-modal').hidden = true;
+      if (!$('img-modal').hidden) closeImages();
+    }
   });
   $('clear-btn').addEventListener('click', async () => {
     if (!inspections.length || !confirm('Delete ALL saved scans and recordings on this device?')) return;
@@ -746,6 +990,7 @@ function init() {
       await clearAll();
     } catch (e) { /* ignore */ }
     inspections = [];
+    for (const id of [...urlCache.keys()]) dropImageUrls(id);
     renderLog();
   });
   $('floor-btn').addEventListener('click', () => {

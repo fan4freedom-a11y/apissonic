@@ -1,6 +1,6 @@
 // sw.js — offline cache so ApisSonic keeps working at apiaries with no signal.
 // Bump CACHE whenever you deploy changed files.
-const CACHE = 'apissonic-v2';
+const CACHE = 'apissonic-v3';
 const ASSETS = [
   './',
   'index.html',
@@ -11,6 +11,7 @@ const ASSETS = [
   'calibration.js',
   'audio-store.js',
   'qr-report.js',
+  'scan-images.js',
   'manifest.json',
   'test-suite.html',
   'dsp-ml-tests.js',

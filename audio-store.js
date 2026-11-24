@@ -1,10 +1,11 @@
 // audio-store.js — ApisSonic Phase 2
-// 16-bit mono PCM .wav encoder + IndexedDB wrapper (inspections + wav_clips).
+// 16-bit mono PCM .wav encoder + IndexedDB wrapper (inspections + wav_clips + scan_images).
 
 const DB_NAME = 'apissonic';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2 adds scan_images (spectrum / waterfall / MFCC PNGs per scan)
 export const STORE_INSPECTIONS = 'inspections';
 export const STORE_CLIPS = 'wav_clips';
+export const STORE_IMAGES = 'scan_images';
 
 function flatten(chunks) {
   if (chunks instanceof Float32Array) return chunks;
@@ -71,6 +72,7 @@ function openDB() {
         const db = req.result;
         if (!db.objectStoreNames.contains(STORE_INSPECTIONS)) db.createObjectStore(STORE_INSPECTIONS, { keyPath: 'id' });
         if (!db.objectStoreNames.contains(STORE_CLIPS)) db.createObjectStore(STORE_CLIPS, { keyPath: 'id' });
+        if (!db.objectStoreNames.contains(STORE_IMAGES)) db.createObjectStore(STORE_IMAGES, { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -100,13 +102,23 @@ export const getClip = async (id) => {
   const rec = await run(STORE_CLIPS, 'readonly', (s) => s.get(id));
   return rec ? rec.blob : null;
 };
+/** images: { spectrum, waterfall, mfcc } PNG blobs for inspection `id`. */
+export const saveImages = (id, images) => run(STORE_IMAGES, 'readwrite', (s) => s.put({ id, ...images }));
+export const getImages = async (id) => {
+  const rec = await run(STORE_IMAGES, 'readonly', (s) => s.get(id));
+  if (!rec) return null;
+  const { id: _id, ...images } = rec;
+  return images;
+};
 export async function deleteInspection(id) {
   await run(STORE_INSPECTIONS, 'readwrite', (s) => s.delete(id));
   await run(STORE_CLIPS, 'readwrite', (s) => s.delete(id));
+  await run(STORE_IMAGES, 'readwrite', (s) => s.delete(id));
 }
 export async function clearAll() {
   await run(STORE_INSPECTIONS, 'readwrite', (s) => s.clear());
   await run(STORE_CLIPS, 'readwrite', (s) => s.clear());
+  await run(STORE_IMAGES, 'readwrite', (s) => s.clear());
 }
 
 /** Ask the browser not to evict our data (matters on iOS for rarely-opened apps). */

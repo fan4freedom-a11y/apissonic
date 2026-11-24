@@ -28,12 +28,24 @@ Any static HTTPS host works the same way (Cloudflare Pages, Netlify — `netlify
 ```bash
 python3 -m http.server 8080        # or: npx http-server . -p 8080
 # http://localhost:8080/            the app (mic works on localhost)
-# http://localhost:8080/test-suite.html   16 self-tests
-node tests/dsp-ml-tests.js         # same 16 tests in Node
+# http://localhost:8080/test-suite.html   17 self-tests
+node tests/dsp-ml-tests.js         # same 17 tests in Node
 ```
 
 Phone on the same Wi-Fi without hosting: `/usr/bin/ruby ./start-phone-server.rb 8443`
 (self-signed certificate; accept the browser warning).
+
+## Colonies and saved scan images
+
+- **Hive ID** is a dropdown of your colonies. Pick the colony you are listening to before the
+  15 s scan; the scan is saved under that colony. Choose **＋ Add new colony…** to register a
+  new one, and **✕** to remove a colony that has no saved scans. Colonies with saved scans
+  and colonies opened from a QR tag are listed automatically.
+- Every saved 15 s scan also stores three PNG images on the device (IndexedDB `scan_images`):
+  the mean **spectrum** of the clean frames, the **waterfall** of the whole scan, and the
+  **MFCC** cepstrogram. Rejected frames are marked red in the waterfall and MFCC images.
+- **Yard triage** shows thumbnails of each hive's latest images; tap one to view it full size
+  and save it (or all three). Older scans' images open from the **🖼** button in the log.
 
 ## First check on a real phone
 
@@ -51,7 +63,8 @@ Open **Calibration & model** while listening with the microphone:
 | `dsp-engine.js` | Web Audio graph, 4096-pt FFT, band power, transient rejection, 15 s scan, synthesizer |
 | `ml-classifier.js` | 24 mel bands, 13 MFCCs, roll-off / flux / ZCR, 18→8→5 MLP, Bayesian band-ratio, 60/40 fusion |
 | `calibration.js` | Wall-material gains, temperature / night priors, mic noise floor |
-| `audio-store.js` | 16-bit mono WAV encoder, IndexedDB (`inspections`, `wav_clips`) |
+| `audio-store.js` | 16-bit mono WAV encoder, IndexedDB (`inspections`, `wav_clips`, `scan_images`) |
+| `scan-images.js` | Records each 15 s scan and renders the spectrum, waterfall and MFCC PNGs saved for Yard triage |
 | `qr-report.js` | Deep links, QR generator, yard triage ranking, printable report |
 | `app.js`, `index.html`, `styles.css` | Mobile UI |
 | `ml/train_hive_classifier.py` | Trainer (numpy) → `ml/custom_mlp_weights.json` |

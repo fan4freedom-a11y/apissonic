@@ -34,9 +34,19 @@
     <section class="card" aria-labelledby="h-setup">
       <h2 id="h-setup">Hive</h2>
       <div class="form-grid">
-        <label>Hive ID
-          <input id="hive-id" type="text" maxlength="40" autocomplete="off" placeholder="e.g. Hive-07">
-        </label>
+        <div class="hive-field">
+          <label for="hive-id">Hive ID — colony being sensed</label>
+          <div class="hive-picker">
+            <select id="hive-id" aria-describedby="hive-hint"></select>
+            <button id="hive-remove-btn" class="icon-btn square" type="button" aria-label="Remove this colony from the list" title="Remove colony from list">✕</button>
+          </div>
+          <div id="hive-new-row" class="hive-new" hidden>
+            <input id="hive-new" type="text" maxlength="40" autocomplete="off" placeholder="New colony, e.g. Hive-07" aria-label="New colony name">
+            <button id="hive-add-btn" class="btn small primary" type="button">Add</button>
+            <button id="hive-cancel-btn" class="btn small" type="button">Cancel</button>
+          </div>
+          <p id="hive-hint" class="hint field-hint"></p>
+        </div>
         <label>Mic position / wall
           <select id="material"></select>
         </label>
@@ -109,6 +119,7 @@
 
     <section class="card" aria-labelledby="h-triage">
       <h2 id="h-triage">Yard triage</h2>
+      <p class="hint triage-hint">Each 15 s scan saves its spectrum, waterfall and MFCC images. Tap a thumbnail to view or save them.</p>
       <div id="triage-grid" class="triage-grid"></div>
     </section>
 
@@ -133,7 +144,7 @@
         <input id="weights-input" type="file" accept="application/json,.json" hidden>
       </div>
       <p id="tools-meta" class="hint"></p>
-      <p class="hint"><a href="test-suite.html">Run the 16 self-tests</a></p>
+      <p class="hint"><a href="test-suite.html">Run the 17 self-tests</a></p>
     </section>
   </main>
 
@@ -146,6 +157,24 @@
       <div class="button-row">
         <button id="qr-print-btn" class="btn primary small" type="button">Print tag</button>
         <button id="qr-close-btn" class="btn small" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="img-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="img-title">
+    <div class="modal-box wide">
+      <h2 id="img-title">Scan images</h2>
+      <p id="img-caption" class="img-caption"></p>
+      <div class="tabs" role="tablist" id="img-tabs">
+        <button type="button" role="tab" data-img="spectrum" aria-selected="true">Spectrum</button>
+        <button type="button" role="tab" data-img="waterfall" aria-selected="false">Waterfall</button>
+        <button type="button" role="tab" data-img="mfcc" aria-selected="false">MFCC</button>
+      </div>
+      <div class="img-holder"><img id="img-view" alt=""></div>
+      <div class="button-row wrap">
+        <button id="img-dl-btn" class="btn primary small" type="button">⬇ Save this image</button>
+        <button id="img-dl-all-btn" class="btn small" type="button">⬇ Save all 3</button>
+        <button id="img-close-btn" class="btn small" type="button">Close</button>
       </div>
     </div>
   </div>
